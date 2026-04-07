@@ -271,7 +271,385 @@ async function updateStats() {
     completedCountEl.textContent = stats.completed;
 }
 
-function showAlert(message, type) {
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ============================================
+// AI Chat Functionality
+// ============================================
+
+// Chat DOM Elements
+let chatForm, messageInput, chatMessages, sendBtn, clearChatBtn, autoScrollCheckbox;
+
+// Chat state
+let chatHistory = [];
+
+// Initialize chat when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    loadTodos();
+    setupEventListeners();
+    initializeChat();
+});
+
+// Initialize chat elements and event listeners
+function initializeChat() {
+    chatForm = document.getElementById('chat-form');
+    messageInput = document.getElementById('message-input');
+    chatMessages = document.getElementById('chat-messages');
+    sendBtn = document.getElementById('send-btn');
+    clearChatBtn = document.getElementById('clear-chat-btn');
+    autoScrollCheckbox = document.getElementById('auto-scroll');
+    const testConnectionBtn = document.getElementById('test-connection-btn');
+    const viewStatusBtn = document.getElementById('view-status-btn');
+
+    if (chatForm) {
+        chatForm.addEventListener('submit', handleChatSubmit);
+        clearChatBtn.addEventListener('click', clearChat);
+        messageInput.addEventListener('input', updateSendButton);
+        updateSendButton();
+
+        // Add event listeners for new buttons
+        if (testConnectionBtn) {
+            testConnectionBtn.addEventListener('click', testAPIConnection);
+        }
+        if (viewStatusBtn) {
+            viewStatusBtn.addEventListener('click', showStatusDetails);
+        }
+
+        // Check AI API status
+        checkAIStatus();
+    }
+}
+
+// Check AI API status
+async function checkAIStatus() {
+    try {
+        const statusIndicator = document.getElementById('ai-status-indicator');
+        if (!statusIndicator) return;
+
+        const response = await fetch('/api/ai/status');
+        if (!response.ok) throw new Error('Failed to check AI status');
+        const status = await response.json();
+
+        if (status.configured) {
+            statusIndicator.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle"></i>
+                    <strong>AI Assistant Ready</strong>
+                    <p class="mb-0 small">API key configured (${status.api_key_masked})</p>
+                </div>
+            `;
+
+            // Enable chat input if previously disabled
+            if (messageInput) {
+                messageInput.disabled = false;
+                messageInput.placeholder = "Type your message here...";
+            }
+            if (sendBtn) {
+                sendBtn.disabled = !messageInput?.value.trim();
+            }
+        } else {
+            statusIndicator.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>AI Assistant Not Configured</strong>
+                    <p class="mb-0 small">${status.message}</p>
+                    <p class="mb-0 small mt-1">
+                        <a href="https://platform.deepseek.com/" target="_blank" class="alert-link">
+                            Get API key from DeepSeek
+                        </a>
+                    </p>
+                </div>
+            `;
+
+            // Disable chat input if not configured
+            if (messageInput) {
+                messageInput.disabled = true;
+                messageInput.placeholder = "Please configure API key first";
+            }
+            if (sendBtn) {
+                sendBtn.disabled = true;
+            }
+        }
+    } catch (error) {
+        console.error('Error checking AI status:', error);
+        // Show error status
+        const statusIndicator = document.getElementById('ai-status-indicator');
+        if (statusIndicator) {
+            statusIndicator.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i>
+                    <strong>Error Checking AI Status</strong>
+                    <p class="mb-0 small">Failed to connect to server. Please refresh the page.</p>
+                </div>
+            `;
+        }
+    }
+}
+
+// Update send button state based on input
+function updateSendButton() {
+    if (sendBtn) {
+        sendBtn.disabled = !messageInput.value.trim();
+    }
+}
+
+// Handle chat form submission
+async function handleChatSubmit(e) {
+    e.preventDefault();
+
+    const message = messageInput.value.trim();
+    if (!message) return;
+
+    // Clear input
+    messageInput.value = '';
+    updateSendButton();
+
+    // Add user message to chat
+    addMessageToChat('user', message);
+    chatHistory.push({ role: 'user', content: message });
+
+    // Show loading indicator
+    const loadingId = showLoadingIndicator();
+
+    try {
+        // Send to API
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message })
+        });
+
+        // Remove loading indicator
+        removeLoadingIndicator(loadingId);
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to get AI response');
+        }
+
+        const data = await response.json();
+
+        // Add AI response to chat
+        addMessageToChat('ai', data.response);
+        chatHistory.push({ role: 'assistant', content: data.response });
+
+        // Show success alert
+        showAlert('AI response received!', 'success');
+    } catch (error) {
+        removeLoadingIndicator(loadingId);
+        console.error('Chat error:', error);
+        addMessageToChat('ai', `Sorry, I encountered an error: ${error.message}. Please check your API key and try again.`);
+        showAlert(`Error: ${error.message}`, 'danger');
+    }
+}
+
+// Add a message to the chat display
+function addMessageToChat(sender, content) {
+    if (!chatMessages) return;
+
+    // Remove the "start conversation" placeholder if present
+    const placeholder = chatMessages.querySelector('.text-center');
+    if (placeholder) {
+        placeholder.remove();
+    }
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `chat-message ${sender}`;
+
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const senderLabel = sender === 'user' ? 'You' : 'AI Assistant';
+
+    messageDiv.innerHTML = `
+        <div class="chat-message-header">
+            <span>${escapeHtml(senderLabel)}</span>
+            <span class="chat-message-time">${timestamp}</span>
+        </div>
+        <div class="chat-message-content">${escapeHtml(content)}</div>
+    `;
+
+    chatMessages.appendChild(messageDiv);
+
+    // Auto-scroll if enabled
+    if (autoScrollCheckbox.checked) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+}
+
+// Show loading indicator
+function showLoadingIndicator() {
+    if (!chatMessages) return null;
+
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'chat-loading';
+    loadingDiv.id = 'chat-loading-indicator';
+    loadingDiv.innerHTML = `
+        <div class="spinner-border text-success" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <span>AI is thinking...</span>
+    `;
+
+    chatMessages.appendChild(loadingDiv);
+
+    // Auto-scroll if enabled
+    if (autoScrollCheckbox.checked) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    return 'chat-loading-indicator';
+}
+
+// Remove loading indicator
+function removeLoadingIndicator(id) {
+    const indicator = document.getElementById(id);
+    if (indicator) {
+        indicator.remove();
+    }
+}
+
+// Clear chat history
+function clearChat() {
+    if (!confirm('Are you sure you want to clear the chat history?')) {
+        return;
+    }
+
+    chatHistory = [];
+
+    if (chatMessages) {
+        chatMessages.innerHTML = `
+            <div class="text-center text-muted py-5">
+                <i class="bi bi-chat-quote display-1"></i>
+                <h5 class="mt-3">Start a conversation</h5>
+                <p>Send a message to begin chatting with the AI assistant.</p>
+            </div>
+        `;
+    }
+
+    showAlert('Chat cleared successfully!', 'success');
+}
+
+// Test API connection
+async function testAPIConnection() {
+    const testConnectionBtn = document.getElementById('test-connection-btn');
+    if (testConnectionBtn) {
+        testConnectionBtn.disabled = true;
+        testConnectionBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Testing...';
+    }
+
+    try {
+        const response = await fetch('/api/ai/test');
+        if (!response.ok) throw new Error('Failed to test API');
+        const result = await response.json();
+
+        let alertType = result.success ? 'success' : 'danger';
+        let alertMessage = '';
+
+        if (result.success) {
+            alertMessage = `
+                ✅ API connection successful!
+                <br><small>Model: ${result.model || 'Unknown'}</small>
+                <br><small>Response: "${result.response || 'No response'}"</small>
+            `;
+        } else {
+            alertMessage = `
+                ❌ API connection failed
+                <br><small>Status code: ${result.status_code || 'Unknown'}</small>
+                <br><small>Key format: ${result.key_format_info?.starts_with_sk ? 'sk- prefix' : 'Non-standard format'}</small>
+                <br><small>Error: ${result.error || 'Unknown error'}</small>
+            `;
+
+            // Show format warning if key starts with sk-
+            if (result.key_format_info?.starts_with_sk) {
+                alertMessage += `
+                    <div class="mt-2 alert alert-warning p-2">
+                        <strong>⚠ Key Format Issue:</strong> Your key starts with "sk-" which is OpenAI format.
+                        <br>Get a DeepSeek key from: <a href="https://platform.deepseek.com/" target="_blank">platform.deepseek.com</a>
+                    </div>
+                `;
+            }
+        }
+
+        showAlert(alertMessage, alertType);
+
+    } catch (error) {
+        console.error('Connection test error:', error);
+        showAlert(`❌ Connection test failed: ${error.message}`, 'danger');
+    } finally {
+        if (testConnectionBtn) {
+            testConnectionBtn.disabled = false;
+            testConnectionBtn.innerHTML = '<i class="bi bi-plug"></i> Test Connection';
+        }
+    }
+}
+
+// Show detailed status information
+function showStatusDetails() {
+    fetch('/api/ai/status')
+        .then(response => response.json())
+        .then(status => {
+            let detailsHtml = `
+                <div class="status-details">
+                    <h6 class="mb-3">API Configuration Details</h6>
+                    <table class="table table-sm table-borderless">
+                        <tr>
+                            <th>Configured:</th>
+                            <td>${status.configured ? '✅ Yes' : '❌ No'}</td>
+                        </tr>
+                        <tr>
+                            <th>Key Masked:</th>
+                            <td><code>${status.api_key_masked || 'N/A'}</code></td>
+                        </tr>
+                        <tr>
+                            <th>Key Length:</th>
+                            <td>${status.key_length || 0} characters</td>
+                        </tr>
+            `;
+
+            if (status.key_format) {
+                detailsHtml += `
+                        <tr>
+                            <th>Key Format:</th>
+                            <td>${status.key_format.starts_with_sk ? '⚠ Starts with "sk-" (OpenAI format)' : '✅ Non-standard format (may be correct)'}</td>
+                        </tr>
+                `;
+            }
+
+            detailsHtml += `
+                        <tr>
+                            <th>Status:</th>
+                            <td>${status.message || 'N/A'}</td>
+                        </tr>
+                    </table>
+            `;
+
+            if (status.format_note) {
+                detailsHtml += `<div class="alert alert-info p-2 small mb-0">${status.format_note}</div>`;
+            }
+
+            detailsHtml += `
+                <div class="mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testAPIConnection()">
+                        <i class="bi bi-plug"></i> Test Connection
+                    </button>
+                </div>
+                </div>
+            `;
+
+            showAlert(detailsHtml, 'info', false);
+        })
+        .catch(error => {
+            console.error('Status details error:', error);
+            showAlert(`Failed to get status details: ${error.message}`, 'danger');
+        });
+}
+
+// Update showAlert to optionally allow HTML
+function showAlert(message, type, allowHtml = false) {
     // Remove any existing alerts
     const existingAlert = document.querySelector('.alert');
     if (existingAlert) existingAlert.remove();
@@ -282,23 +660,66 @@ function showAlert(message, type) {
     alert.style.right = '20px';
     alert.style.zIndex = '1050';
     alert.style.minWidth = '300px';
-    alert.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
+    alert.style.maxWidth = '500px';
+
+    if (allowHtml) {
+        alert.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+    } else {
+        alert.innerHTML = `
+            ${escapeHtml(message)}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+    }
 
     document.body.appendChild(alert);
 
-    // Auto dismiss after 3 seconds
+    // Auto dismiss after 5 seconds
     setTimeout(() => {
         if (alert.parentNode) {
             alert.remove();
         }
-    }, 3000);
+    }, 5000);
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// Synchronize navbar with tab system and handle tab changes
+document.addEventListener('DOMContentLoaded', () => {
+    const navbarLinks = document.querySelectorAll('.navbar-nav .nav-link');
+    const tabButtons = document.querySelectorAll('#mainTabs .nav-link');
+
+    navbarLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const tabId = link.getAttribute('data-tab');
+            if (tabId) {
+                // Find the corresponding tab button and click it
+                tabButtons.forEach(btn => {
+                    if (btn.getAttribute('href') === `#${tabId}`) {
+                        btn.click();
+                    }
+                });
+            }
+        });
+    });
+
+    // Add event listener for tab changes to update AI status when AI tab is shown
+    const aiTabBtn = document.getElementById('ai-tab-btn');
+    if (aiTabBtn) {
+        aiTabBtn.addEventListener('shown.bs.tab', function (e) {
+            // Update AI status when AI tab becomes active
+            setTimeout(() => {
+                checkAIStatus();
+            }, 100);
+        });
+    }
+
+    // Also check AI status when page loads if AI tab is active
+    const activeTab = document.querySelector('#mainTabs .nav-link.active');
+    if (activeTab && activeTab.getAttribute('href') === '#ai-tab') {
+        setTimeout(() => {
+            checkAIStatus();
+        }, 500);
+    }
+});
