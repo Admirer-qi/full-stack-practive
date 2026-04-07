@@ -38,6 +38,12 @@ def after_request(response):
 todos = []
 next_id = 1
 
+# Proxy configuration (optional)
+PROXY_CONFIG = os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
+if PROXY_CONFIG:
+    print(f"Proxy configuration detected: {PROXY_CONFIG}")
+    # Note: Requests will automatically use HTTP_PROXY/HTTPS_PROXY environment variables
+
 # Load todos from JSON file if exists
 DATA_FILE = 'data/todos.json'
 
@@ -151,9 +157,9 @@ def get_stats():
     })
 
 # DeepSeek AI Chat API Integration
-DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
 DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions'
-
+DEEPSEEK_MODEL = "deepseek-chat" 
 # Debug info about API key
 if DEEPSEEK_API_KEY:
     masked_key = DEEPSEEK_API_KEY[:8] + '...' + DEEPSEEK_API_KEY[-4:] if len(DEEPSEEK_API_KEY) > 12 else '***'
@@ -225,7 +231,10 @@ def test_ai_api():
             'stream': False
         }
 
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=10)
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+
+        # 记录详细的请求信息（不包含完整密钥）
+        print(f"API Test - Status: {response.status_code}, Key starts with sk-: {DEEPSEEK_API_KEY.startswith('sk-')}")
 
         result = {
             'status_code': response.status_code,
@@ -241,7 +250,23 @@ def test_ai_api():
             result['response'] = data.get('choices', [{}])[0].get('message', {}).get('content', '')
             result['model'] = data.get('model', '')
         else:
-            result['error'] = response.text
+            # 尝试解析JSON错误信息
+            try:
+                error_data = response.json()
+                if 'error' in error_data:
+                    error_msg = error_data['error']
+                    if isinstance(error_msg, dict) and 'message' in error_msg:
+                        result['error'] = error_msg['message']
+                        print(f"API Test Error: {error_msg['message']}")
+                    else:
+                        result['error'] = str(error_msg)
+                        print(f"API Test Error: {error_msg}")
+                else:
+                    result['error'] = response.text
+                    print(f"API Test Raw Error: {response.text[:200]}")
+            except:
+                result['error'] = response.text
+                print(f"API Test Raw Error: {response.text[:200]}")
 
         return jsonify(result)
 
@@ -290,7 +315,7 @@ def chat():
             'stream': False
         }
 
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
 
         result = response.json()
@@ -302,6 +327,17 @@ def chat():
         })
 
     except requests.exceptions.RequestException as e:
+        # Log detailed error information
+        print(f"AI Chat Error: {type(e).__name__}: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response Status: {e.response.status_code}")
+            print(f"Response Headers: {dict(e.response.headers)}")
+            try:
+                error_text = e.response.text[:500]
+                print(f"Response Body (first 500 chars): {error_text}")
+            except:
+                pass
+
         # Provide more specific error messages
         if hasattr(e.response, 'status_code'):
             if e.response.status_code == 401:
