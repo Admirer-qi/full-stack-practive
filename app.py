@@ -1,8 +1,9 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, session
 import json
 import os
 from datetime import datetime
 import requests
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Try to load dotenv for .env file support
 try:
@@ -14,6 +15,7 @@ except ImportError:
     print("   Install with: pip install python-dotenv")
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
 
 # Load environment variables from .env file if it exists and dotenv is available
 if dotenv_available:
@@ -37,6 +39,8 @@ def after_request(response):
 # In-memory storage for todos
 todos = []
 next_id = 1
+users = []
+next_user_id = 1
 
 # Proxy configuration (optional)
 PROXY_CONFIG = os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
@@ -46,6 +50,33 @@ if PROXY_CONFIG:
 
 # Load todos from JSON file if exists
 DATA_FILE = 'data/todos.json'
+USERS_FILE = 'data/users.json'
+
+def load_users():
+    global users, next_user_id
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, 'r') as f:
+                data = json.load(f)
+                users = data.get('users', [])
+                if users:
+                    next_user_id = max(user['id'] for user in users) + 1
+                else:
+                    next_user_id = 1
+            print(f"Loaded {len(users)} users from {USERS_FILE}")
+        except Exception as e:
+            print(f"Error loading users: {e}")
+            users = []
+            next_user_id = 1
+
+def save_users():
+    try:
+        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+        with open(USERS_FILE, 'w') as f:
+            json.dump({'users': users}, f, indent=2)
+        print(f"Saved {len(users)} users to {USERS_FILE}")
+    except Exception as e:
+        print(f"Error saving users: {e}")
 
 def load_todos():
     global todos, next_id
@@ -54,6 +85,10 @@ def load_todos():
             with open(DATA_FILE, 'r') as f:
                 data = json.load(f)
                 todos = data.get('todos', [])
+                # Ensure each todo has a user_id field (default 0 for old todos)
+                for todo in todos:
+                    if 'user_id' not in todo:
+                        todo['user_id'] = 0
                 if todos:
                     next_id = max(todo['id'] for todo in todos) + 1
                 else:
@@ -75,6 +110,97 @@ def save_todos():
 
 # Load todos on startup
 load_todos()
+load_users()
+
+def get_current_user_id():
+    return session.get('user_id')
+
+def login_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not get_current_user_id():
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Authentication routes
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    if not data or 'username' not in data or 'password' not in data:
+        return jsonify({'error': 'Username and password required'}), 400
+
+    username = data['username'].strip()
+    password = data['password']
+
+    if not username or not password:
+        return jsonify({'error': 'Username and password cannot be empty'}), 400
+
+    # Check if username already exists
+    if any(user['username'] == username for user in users):
+        return jsonify({'error': 'Username already exists'}), 409
+
+    global next_user_id
+    user_id = next_user_id
+    next_user_id += 1
+
+    user = {
+        'id': user_id,
+        'username': username,
+        'password_hash': generate_password_hash(password)
+    }
+
+    users.append(user)
+    save_users()
+
+    # Log the user in
+    session['user_id'] = user_id
+
+    return jsonify({
+        'id': user_id,
+        'username': username
+    }), 201
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    if not data or 'username' not in data or 'password' not in data:
+        return jsonify({'error': 'Username and password required'}), 400
+
+    username = data['username'].strip()
+    password = data['password']
+
+    user = next((u for u in users if u['username'] == username), None)
+    if not user or not check_password_hash(user['password_hash'], password):
+        return jsonify({'error': 'Invalid username or password'}), 401
+
+    session['user_id'] = user['id']
+    return jsonify({
+        'id': user['id'],
+        'username': user['username']
+    })
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    session.pop('user_id', None)
+    return jsonify({'message': 'Logged out successfully'})
+
+@app.route('/api/me', methods=['GET'])
+def get_current_user():
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    user = next((u for u in users if u['id'] == user_id), None)
+    if not user:
+        session.pop('user_id', None)
+        return jsonify({'error': 'User not found'}), 404
+
+    return jsonify({
+        'id': user['id'],
+        'username': user['username']
+    })
 
 @app.route('/')
 def index():
@@ -82,12 +208,17 @@ def index():
 
 # API Routes
 @app.route('/api/todos', methods=['GET'])
+@login_required
 def get_todos():
-    return jsonify(todos)
+    user_id = get_current_user_id()
+    user_todos = [t for t in todos if t.get('user_id') == user_id]
+    return jsonify(user_todos)
 
 @app.route('/api/todos', methods=['POST'])
+@login_required
 def create_todo():
     global next_id
+    user_id = get_current_user_id()
     data = request.get_json()
 
     if not data or 'title' not in data:
@@ -95,6 +226,7 @@ def create_todo():
 
     todo = {
         'id': next_id,
+        'user_id': user_id,
         'title': data['title'],
         'description': data.get('description', ''),
         'completed': False,
@@ -108,16 +240,20 @@ def create_todo():
     return jsonify(todo), 201
 
 @app.route('/api/todos/<int:todo_id>', methods=['GET'])
+@login_required
 def get_todo(todo_id):
-    todo = next((t for t in todos if t['id'] == todo_id), None)
+    user_id = get_current_user_id()
+    todo = next((t for t in todos if t['id'] == todo_id and t.get('user_id') == user_id), None)
     if todo is None:
         return jsonify({'error': 'Todo not found'}), 404
     return jsonify(todo)
 
 @app.route('/api/todos/<int:todo_id>', methods=['PUT'])
+@login_required
 def update_todo(todo_id):
     data = request.get_json()
-    todo = next((t for t in todos if t['id'] == todo_id), None)
+    user_id = get_current_user_id()
+    todo = next((t for t in todos if t['id'] == todo_id and t.get('user_id') == user_id), None)
 
     if todo is None:
         return jsonify({'error': 'Todo not found'}), 404
@@ -134,10 +270,12 @@ def update_todo(todo_id):
     return jsonify(todo)
 
 @app.route('/api/todos/<int:todo_id>', methods=['DELETE'])
+@login_required
 def delete_todo(todo_id):
     global todos
+    user_id = get_current_user_id()
     initial_length = len(todos)
-    todos = [t for t in todos if t['id'] != todo_id]
+    todos = [t for t in todos if not (t['id'] == todo_id and t.get('user_id') == user_id)]
 
     if len(todos) == initial_length:
         return jsonify({'error': 'Todo not found'}), 404
@@ -146,9 +284,12 @@ def delete_todo(todo_id):
     return jsonify({'message': 'Todo deleted successfully'}), 200
 
 @app.route('/api/stats', methods=['GET'])
+@login_required
 def get_stats():
-    total = len(todos)
-    completed = sum(1 for t in todos if t['completed'])
+    user_id = get_current_user_id()
+    user_todos = [t for t in todos if t.get('user_id') == user_id]
+    total = len(user_todos)
+    completed = sum(1 for t in user_todos if t['completed'])
     active = total - completed
     return jsonify({
         'total': total,

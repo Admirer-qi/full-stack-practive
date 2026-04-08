@@ -1,0 +1,19 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "testuser",
+      "password_hash": "pbkdf2:sha256:260000$oZoaQXzXdMuWqHbf$0a830a69760fd85c03fedc91dd349bd9e4286b47c5c4ba5755a4ec848d634a0c"
+    },
+    {
+      "id": 2,
+      "username": "testuser_pgjcfwap",
+      "password_hash": "pbkdf2:sha256:260000$nbkeaEGyc5bXPGCG$bea546958528d33a3e5ae762ddd0a8d1e4cb7467bda6d7e42b2e4a195165c502"
+    },
+    {
+      "id": 3,
+      "username": "han",
+      "password_hash": "pbkdf2:sha256:260000$KM8sfQFVwzi7ddvO$98ab66958aba12a909efeeefd878fbf31e152e6c8fd424b4b3bb509885f4cf12"
+    }
+  ]
+}

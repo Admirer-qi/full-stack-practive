@@ -41,7 +41,14 @@ function setupEventListeners() {
 async function fetchTodos() {
     try {
         const response = await fetch(API_BASE);
-        if (!response.ok) throw new Error('Failed to fetch todos');
+        if (!response.ok) {
+            if (response.status === 401) {
+                // Not authenticated
+                showAlert('Please login to view your todos', 'warning');
+                return [];
+            }
+            throw new Error('Failed to fetch todos');
+        }
         return await response.json();
     } catch (error) {
         console.error('Error fetching todos:', error);
@@ -53,7 +60,13 @@ async function fetchTodos() {
 async function fetchStats() {
     try {
         const response = await fetch(STATS_API);
-        if (!response.ok) throw new Error('Failed to fetch stats');
+        if (!response.ok) {
+            if (response.status === 401) {
+                // Not authenticated
+                return { total: 0, active: 0, completed: 0 };
+            }
+            throw new Error('Failed to fetch stats');
+        }
         return await response.json();
     } catch (error) {
         console.error('Error fetching stats:', error);
@@ -648,6 +661,201 @@ function showStatusDetails() {
         });
 }
 
+// ============================================
+// Authentication Functions
+// ============================================
+
+let currentUser = null;
+
+async function checkAuth() {
+    try {
+        const response = await fetch('/api/me');
+        if (response.ok) {
+            const user = await response.json();
+            currentUser = user;
+            updateNavbar(user);
+            return true;
+        } else {
+            currentUser = null;
+            updateNavbar(null);
+            return false;
+        }
+    } catch (error) {
+        console.error('Auth check error:', error);
+        currentUser = null;
+        updateNavbar(null);
+        return false;
+    }
+}
+
+function updateNavbar(user) {
+    const usernameSpan = document.getElementById('navbar-username');
+    const dropdownMenu = document.querySelector('#user-menu .dropdown-menu');
+    if (!usernameSpan || !dropdownMenu) return;
+
+    if (user) {
+        usernameSpan.textContent = user.username;
+        // Update dropdown items: hide login/register, show logout
+        dropdownMenu.innerHTML = `
+            <li><a class="dropdown-item disabled" href="#">Logged in as <strong>${escapeHtml(user.username)}</strong></a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="#" id="logout-btn">Logout</a></li>
+        `;
+        document.getElementById('logout-btn').addEventListener('click', handleLogout);
+    } else {
+        usernameSpan.textContent = 'Guest';
+        dropdownMenu.innerHTML = `
+            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#loginModal">Login</a></li>
+            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#registerModal">Register</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item disabled" href="#" id="logout-btn">Logout</a></li>
+        `;
+        // Add event listeners for login/register modal triggers (already handled by Bootstrap)
+    }
+}
+
+async function handleLogin(event) {
+    event.preventDefault();
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+
+    if (!username || !password) {
+        showAlert('Please enter username and password', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+
+        if (response.ok) {
+            const user = await response.json();
+            currentUser = user;
+            updateNavbar(user);
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
+            if (modal) modal.hide();
+            // Clear form
+            document.getElementById('login-form').reset();
+            showAlert('Login successful!', 'success');
+            // Reload todos
+            loadTodos();
+        } else {
+            const error = await response.json();
+            showAlert(error.error || 'Login failed', 'danger');
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        showAlert('Login failed: ' + error.message, 'danger');
+    }
+}
+
+async function handleRegister(event) {
+    event.preventDefault();
+    const username = document.getElementById('register-username').value.trim();
+    const password = document.getElementById('register-password').value;
+    const confirmPassword = document.getElementById('register-password-confirm').value;
+
+    if (!username || !password) {
+        showAlert('Please enter username and password', 'warning');
+        return;
+    }
+    if (password !== confirmPassword) {
+        showAlert('Passwords do not match', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+
+        if (response.ok || response.status === 201) {
+            const user = await response.json();
+            currentUser = user;
+            updateNavbar(user);
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('registerModal'));
+            if (modal) modal.hide();
+            // Clear form
+            document.getElementById('register-form').reset();
+            showAlert('Registration successful! You are now logged in.', 'success');
+            // Reload todos
+            loadTodos();
+        } else {
+            const error = await response.json();
+            showAlert(error.error || 'Registration failed', 'danger');
+        }
+    } catch (error) {
+        console.error('Register error:', error);
+        showAlert('Registration failed: ' + error.message, 'danger');
+    }
+}
+
+async function handleLogout(event) {
+    if (event) event.preventDefault();
+    try {
+        const response = await fetch('/api/logout', { method: 'POST' });
+        if (response.ok) {
+            currentUser = null;
+            updateNavbar(null);
+            showAlert('Logged out successfully', 'success');
+            // Clear todos list
+            todos = [];
+            renderTodos();
+            updateStats();
+        } else {
+            const error = await response.json();
+            showAlert(error.error || 'Logout failed', 'danger');
+        }
+    } catch (error) {
+        console.error('Logout error:', error);
+        showAlert('Logout failed: ' + error.message, 'danger');
+    }
+}
+
+// Initialize authentication when DOM loads
+document.addEventListener('DOMContentLoaded', () => {
+    // Check auth status
+    checkAuth().then(isAuthenticated => {
+        if (isAuthenticated) {
+            loadTodos();
+        }
+    });
+
+    // Add event listeners for auth forms
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+    }
+    const registerForm = document.getElementById('register-form');
+    if (registerForm) {
+        registerForm.addEventListener('submit', handleRegister);
+    }
+});
+
+// Update existing API functions to handle 401 errors
+const originalFetchTodos = fetchTodos;
+fetchTodos = async function() {
+    try {
+        const response = await originalFetchTodos();
+        return response;
+    } catch (error) {
+        // If error is 401, user is not authenticated
+        if (error.message.includes('401') || error.message.includes('Authentication')) {
+            // Notify user to login
+            showAlert('Please login to view your todos', 'warning');
+            return [];
+        }
+        throw error;
+    }
+};
+
 // Update showAlert to optionally allow HTML
 function showAlert(message, type, allowHtml = false) {
     // Remove any existing alerts
@@ -707,7 +915,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add event listener for tab changes to update AI status when AI tab is shown
     const aiTabBtn = document.getElementById('ai-tab-btn');
     if (aiTabBtn) {
-        aiTabBtn.addEventListener('shown.bs.tab', function (e) {
+        aiTabBtn.addEventListener('shown.bs.tab', function () {
             // Update AI status when AI tab becomes active
             setTimeout(() => {
                 checkAIStatus();
