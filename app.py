@@ -130,11 +130,12 @@ def get_chat_history(user_id=None):
         user_key = str(user_id)
 
     if user_key not in chat_histories:
-        # Initialize with system message
+        # Initialize with system message with current date context
+        current_date = datetime.now().strftime('%B %d, %Y')
         chat_histories[user_key] = [
             {
                 'role': 'system',
-                'content': 'You are a helpful assistant. Please provide clear and concise responses.'
+                'content': f"You are a helpful assistant. Context: The current real-world date is {current_date}. When answering questions that involve dates, times, or temporal information, use {current_date} as your reference point. However, DO NOT mention the date unless specifically asked about it. Only provide the date when the user explicitly asks about today's date, the current time, or similar time-related queries. For example, if asked 'what is today's date?' respond with 'Today is {current_date}.' but otherwise don't volunteer date information. Your training data may contain outdated date references - ignore those and use {current_date} when date information is relevant to the question."
             }
         ]
 
@@ -152,11 +153,12 @@ def clear_chat_history(user_id=None):
         user_key = str(user_id)
 
     if user_key in chat_histories:
-        # Reinitialize with just system message
+        # Reinitialize with just system message with current date context
+        current_date = datetime.now().strftime('%B %d, %Y')
         chat_histories[user_key] = [
             {
                 'role': 'system',
-                'content': 'You are a helpful assistant. Please provide clear and concise responses.'
+                'content': f"You are a helpful assistant. Context: The current real-world date is {current_date}. When answering questions that involve dates, times, or temporal information, use {current_date} as your reference point. However, DO NOT mention the date unless specifically asked about it. Only provide the date when the user explicitly asks about today's date, the current time, or similar time-related queries. For example, if asked 'what is today's date?' respond with 'Today is {current_date}.' but otherwise don't volunteer date information. Your training data may contain outdated date references - ignore those and use {current_date} when date information is relevant to the question."
             }
         ]
         return True
@@ -490,6 +492,12 @@ def chat():
             clear_chat_history()
 
         history = get_chat_history()
+
+        # Update system message with current date context
+        current_date = datetime.now().strftime('%B %d, %Y')
+        if history and history[0]['role'] == 'system':
+            # Update the system message with current date context
+            history[0]['content'] = f"You are a helpful assistant. Context: The current real-world date is {current_date}. When answering questions that involve dates, times, or temporal information, use {current_date} as your reference point. However, DO NOT mention the date unless specifically asked about it. Only provide the date when the user explicitly asks about today's date, the current time, or similar time-related queries. For example, if asked 'what is today's date?' respond with 'Today is {current_date}.' but otherwise don't volunteer date information. Your training data may contain outdated date references - ignore those and use {current_date} when date information is relevant to the question."
 
         # Add user message to history
         history.append({'role': 'user', 'content': user_message})
