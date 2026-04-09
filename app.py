@@ -91,6 +91,11 @@ def load_todos():
                 for todo in todos:
                     if 'user_id' not in todo:
                         todo['user_id'] = 0
+                    # Ensure each todo has due_date and tags fields (for backward compatibility)
+                    if 'due_date' not in todo:
+                        todo['due_date'] = None
+                    if 'tags' not in todo:
+                        todo['tags'] = []
                 if todos:
                     next_id = max(todo['id'] for todo in todos) + 1
                 else:
@@ -261,6 +266,15 @@ def index():
 def get_todos():
     user_id = get_current_user_id()
     user_todos = [t for t in todos if t.get('user_id') == user_id]
+
+    # Sort by due_date (None values last), then by created_at
+    def sort_key(todo):
+        due_date = todo.get('due_date')
+        if due_date is None:
+            return ('9999-12-31', todo.get('created_at', ''))
+        return (due_date, todo.get('created_at', ''))
+
+    user_todos.sort(key=sort_key)
     return jsonify(user_todos)
 
 @app.route('/api/todos', methods=['POST'])
@@ -273,11 +287,20 @@ def create_todo():
     if not data or 'title' not in data:
         return jsonify({'error': 'Title is required'}), 400
 
+    # Validate tags if provided
+    tags = data.get('tags', [])
+    if tags:
+        # Ensure tags are valid (only work, study, life allowed)
+        valid_tags = ['work', 'study', 'life']
+        tags = [tag for tag in tags if tag in valid_tags]
+
     todo = {
         'id': next_id,
         'user_id': user_id,
         'title': data['title'],
         'description': data.get('description', ''),
+        'due_date': data.get('due_date', None),
+        'tags': tags,
         'completed': False,
         'created_at': datetime.now().isoformat()
     }
@@ -312,6 +335,13 @@ def update_todo(todo_id):
         todo['title'] = data['title']
     if 'description' in data:
         todo['description'] = data['description']
+    if 'due_date' in data:
+        todo['due_date'] = data['due_date']
+    if 'tags' in data:
+        # Validate tags
+        valid_tags = ['work', 'study', 'life']
+        tags = [tag for tag in data['tags'] if tag in valid_tags]
+        todo['tags'] = tags
     if 'completed' in data:
         todo['completed'] = data['completed']
 

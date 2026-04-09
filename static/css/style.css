@@ -112,6 +112,62 @@ body {
     font-weight: 500;
 }
 
+.todo-due-date {
+    font-size: 0.85rem;
+    color: #e53e3e;
+    font-weight: 600;
+    margin-left: 10px;
+}
+
+.todo-due-date.overdue {
+    color: #c53030;
+    background-color: #fed7d7;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.todo-item.completed .todo-due-date {
+    color: #a0aec0;
+    text-decoration: line-through;
+}
+
+.todo-item.completed .todo-due-date.overdue {
+    background-color: #e2e8f0;
+    color: #a0aec0;
+}
+
+.todo-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+    margin-bottom: 12px;
+}
+
+.todo-tag {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.todo-tag.work {
+    background-color: #fed7d7;
+    color: #c53030;
+}
+
+.todo-tag.study {
+    background-color: #bee3f8;
+    color: #2c5282;
+}
+
+.todo-tag.life {
+    background-color: #c6f6d5;
+    color: #276749;
+}
+
 .todo-actions {
     margin-top: 10px;
 }
@@ -646,3 +702,124 @@ body {
 .card-header.bg-light {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%) !important;
 }
+
+/* Todo Card Expanded View */
+.todo-item.expanded {
+    z-index: 10;
+    transform: scale(1.02);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+}
+
+.todo-details {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    margin-top: 0;
+}
+
+.todo-item.expanded .todo-details {
+    max-height: 500px;
+    margin-top: 20px;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 20px;
+}
+
+.todo-full-description {
+    color: #4a5568;
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 15px;
+    white-space: pre-wrap;
+}
+
+.todo-metadata {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    font-size: 0.9rem;
+    color: #718096;
+}
+
+.todo-metadata-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.todo-metadata-item i {
+    font-size: 1rem;
+}
+
+/* Due date warning */
+.due-date-warning {
+    color: #c53030;
+    font-weight: 600;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Tag selection styles */
+.btn-check:checked + .btn-outline-danger {
+    background-color: #fed7d7;
+    color: #c53030;
+    border-color: #c53030;
+}
+
+.btn-check:checked + .btn-outline-primary {
+    background-color: #bee3f8;
+    color: #2c5282;
+    border-color: #2c5282;
+}
+
+.btn-check:checked + .btn-outline-success {
+    background-color: #c6f6d5;
+    color: #276749;
+    border-color: #276749;
+}
+
+/* Tag-based background colors for todo items */
+.todo-item.tag-work {
+    background-color: rgba(254, 215, 215, 0.7); /* light red with transparency */
+    border-left-color: #c53030;
+}
+
+.todo-item.tag-study {
+    background-color: rgba(190, 227, 248, 0.7); /* light blue with transparency */
+    border-left-color: #2c5282;
+}
+
+.todo-item.tag-life {
+    background-color: rgba(198, 246, 213, 0.7); /* light green with transparency */
+    border-left-color: #276749;
+}
+
+/* Ensure completed todos still have their own background */
+.todo-item.tag-work.completed {
+    background: linear-gradient(135deg, rgba(254, 215, 215, 0.5) 0%, rgba(248, 249, 250, 0.8) 100%);
+}
+
+.todo-item.tag-study.completed {
+    background: linear-gradient(135deg, rgba(190, 227, 248, 0.5) 0%, rgba(248, 249, 250, 0.8) 100%);
+}
+
+.todo-item.tag-life.completed {
+    background: linear-gradient(135deg, rgba(198, 246, 213, 0.5) 0%, rgba(248, 249, 250, 0.8) 100%);
+}
+
+/* Color the left border indicator for tagged todos */
+.todo-item.tag-work::before {
+    background: linear-gradient(135deg, rgba(197, 48, 48, 0.8) 0%, rgba(245, 101, 101, 0.8) 100%);
+}
+
+.todo-item.tag-study::before {
+    background: linear-gradient(135deg, rgba(44, 82, 130, 0.8) 0%, rgba(66, 153, 225, 0.8) 100%);
+}
+
+.todo-item.tag-life::before {
+    background: linear-gradient(135deg, rgba(39, 103, 73, 0.8) 0%, rgba(72, 187, 120, 0.8) 100%);
+}
+

@@ -214,6 +214,31 @@
                                         <label for="description" class="form-label">Description</label>
                                         <textarea class="form-control" id="description" rows="2" placeholder="Optional details..."></textarea>
                                     </div>
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="due-date" class="form-label">Due Date (Optional)</label>
+                                            <input type="date" class="form-control" id="due-date">
+                                            <div class="form-text">Select a deadline for this task</div>
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Tags (Optional)</label>
+                                            <div class="btn-group w-100" role="group" data-bs-toggle="buttons">
+                                                <input type="radio" class="btn-check" id="tag-work" name="todo-tag" autocomplete="off" value="work">
+                                                <label class="btn btn-outline-danger" for="tag-work">
+                                                    <i class="bi bi-briefcase"></i> Work
+                                                </label>
+                                                <input type="radio" class="btn-check" id="tag-study" name="todo-tag" autocomplete="off" value="study">
+                                                <label class="btn btn-outline-primary" for="tag-study">
+                                                    <i class="bi bi-book"></i> Study
+                                                </label>
+                                                <input type="radio" class="btn-check" id="tag-life" name="todo-tag" autocomplete="off" value="life">
+                                                <label class="btn btn-outline-success" for="tag-life">
+                                                    <i class="bi bi-heart"></i> Life
+                                                </label>
+                                            </div>
+                                            <div class="form-text">Select one tag</div>
+                                        </div>
+                                    </div>
                                     <button type="submit" class="btn btn-primary">
                                         <i class="bi bi-plus"></i> Add Todo
                                     </button>
