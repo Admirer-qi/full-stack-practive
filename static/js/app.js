@@ -526,24 +526,37 @@ function removeLoadingIndicator(id) {
 }
 
 // Clear chat history
-function clearChat() {
+async function clearChat() {
     if (!confirm('Are you sure you want to clear the chat history?')) {
         return;
     }
 
-    chatHistory = [];
+    try {
+        const response = await fetch('/api/chat/clear', {
+            method: 'POST'
+        });
 
-    if (chatMessages) {
-        chatMessages.innerHTML = `
-            <div class="text-center text-muted py-5">
-                <i class="bi bi-chat-quote display-1"></i>
-                <h5 class="mt-3">Start a conversation</h5>
-                <p>Send a message to begin chatting with the AI assistant.</p>
-            </div>
-        `;
+        if (!response.ok) {
+            throw new Error('Failed to clear chat history on server');
+        }
+
+        chatHistory = [];
+
+        if (chatMessages) {
+            chatMessages.innerHTML = `
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-chat-quote display-1"></i>
+                    <h5 class="mt-3">Start a conversation</h5>
+                    <p>Send a message to begin chatting with the AI assistant.</p>
+                </div>
+            `;
+        }
+
+        showAlert('Chat history cleared successfully!', 'success');
+    } catch (error) {
+        console.error('Error clearing chat history:', error);
+        showAlert(`Failed to clear chat history: ${error.message}`, 'danger');
     }
-
-    showAlert('Chat cleared successfully!', 'success');
 }
 
 // Test API connection
@@ -930,4 +943,46 @@ document.addEventListener('DOMContentLoaded', () => {
             checkAIStatus();
         }, 500);
     }
+
+    // Password visibility toggle functionality
+    function setupPasswordToggles() {
+        // Login password toggle
+        const togglePasswordBtn = document.getElementById('toggle-password');
+        const loginPasswordInput = document.getElementById('login-password');
+
+        if (togglePasswordBtn && loginPasswordInput) {
+            togglePasswordBtn.addEventListener('click', function() {
+                const type = loginPasswordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                loginPasswordInput.setAttribute('type', type);
+                this.innerHTML = type === 'password' ? '<i class="bi bi-eye"></i>' : '<i class="bi bi-eye-slash"></i>';
+            });
+        }
+
+        // Register password toggle
+        const toggleRegisterPasswordBtn = document.getElementById('toggle-register-password');
+        const registerPasswordInput = document.getElementById('register-password');
+
+        if (toggleRegisterPasswordBtn && registerPasswordInput) {
+            toggleRegisterPasswordBtn.addEventListener('click', function() {
+                const type = registerPasswordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                registerPasswordInput.setAttribute('type', type);
+                this.innerHTML = type === 'password' ? '<i class="bi bi-eye"></i>' : '<i class="bi bi-eye-slash"></i>';
+            });
+        }
+
+        // Register password confirm toggle
+        const toggleRegisterPasswordConfirmBtn = document.getElementById('toggle-register-password-confirm');
+        const registerPasswordConfirmInput = document.getElementById('register-password-confirm');
+
+        if (toggleRegisterPasswordConfirmBtn && registerPasswordConfirmInput) {
+            toggleRegisterPasswordConfirmBtn.addEventListener('click', function() {
+                const type = registerPasswordConfirmInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                registerPasswordConfirmInput.setAttribute('type', type);
+                this.innerHTML = type === 'password' ? '<i class="bi bi-eye"></i>' : '<i class="bi bi-eye-slash"></i>';
+            });
+        }
+    }
+
+    // Initialize password toggles
+    setupPasswordToggles();
 });

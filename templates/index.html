@@ -49,65 +49,130 @@
         </div>
     </nav>
 
-    <!-- Login Modal -->
+    <!-- Login Modal - Enhanced -->
     <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="loginModalLabel">Login</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal-header text-center border-0">
+                    <div class="w-100">
+                        <div class="icon-circle bg-primary mb-3 mx-auto">
+                            <i class="bi bi-person-fill text-white"></i>
+                        </div>
+                        <h4 class="modal-title fw-bold" id="loginModalLabel">Welcome Back</h4>
+                        <p class="text-muted mb-0">Sign in to continue to your account</p>
+                    </div>
+                    <button type="button" class="btn-close position-absolute top-0 end-0 m-3" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body p-4 pt-0">
                     <form id="login-form">
-                        <div class="mb-3">
-                            <label for="login-username" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="login-username" required>
+                        <div class="mb-4">
+                            <label for="login-username" class="form-label fw-semibold">Username</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-end-0">
+                                    <i class="bi bi-person text-muted"></i>
+                                </span>
+                                <input type="text" class="form-control border-start-0 ps-0" id="login-username" placeholder="Enter your username" required>
+                            </div>
                         </div>
-                        <div class="mb-3">
-                            <label for="login-password" class="form-label">Password</label>
-                            <input type="password" class="form-control" id="login-password" required>
+                        <div class="mb-4">
+                            <label for="login-password" class="form-label fw-semibold">Password</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-end-0">
+                                    <i class="bi bi-lock text-muted"></i>
+                                </span>
+                                <input type="password" class="form-control border-start-0 ps-0" id="login-password" placeholder="Enter your password" required>
+                                <button class="btn btn-outline-secondary border-start-0" type="button" id="toggle-password">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
                         </div>
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" class="form-check-input" id="login-remember">
-                            <label class="form-check-label" for="login-remember">Remember me</label>
+                        <div class="mb-4 d-flex justify-content-between align-items-center">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="login-remember">
+                                <label class="form-check-label" for="login-remember">Remember me</label>
+                            </div>
+                            <a href="#" class="text-decoration-none small text-primary fw-semibold">Forgot password?</a>
                         </div>
-                        <button type="submit" class="btn btn-primary">Login</button>
+                        <button type="submit" class="btn btn-primary w-100 py-3 fw-semibold">
+                            <i class="bi bi-box-arrow-in-right me-2"></i> Sign In
+                        </button>
+                        <div class="text-center mt-4">
+                            <p class="text-muted mb-0">Don't have an account?
+                                <a href="#" class="text-decoration-none fw-semibold text-primary" data-bs-toggle="modal" data-bs-target="#registerModal" data-bs-dismiss="modal">Sign up</a>
+                            </p>
+                        </div>
                     </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Register Modal -->
+    <!-- Register Modal - Enhanced -->
     <div class="modal fade" id="registerModal" tabindex="-1" aria-labelledby="registerModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="registerModalLabel">Register</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal-header text-center border-0">
+                    <div class="w-100">
+                        <div class="icon-circle bg-success mb-3 mx-auto">
+                            <i class="bi bi-person-plus-fill text-white"></i>
+                        </div>
+                        <h4 class="modal-title fw-bold" id="registerModalLabel">Create Account</h4>
+                        <p class="text-muted mb-0">Join us and start your journey</p>
+                    </div>
+                    <button type="button" class="btn-close position-absolute top-0 end-0 m-3" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body p-4 pt-0">
                     <form id="register-form">
-                        <div class="mb-3">
-                            <label for="register-username" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="register-username" required>
+                        <div class="mb-4">
+                            <label for="register-username" class="form-label fw-semibold">Username</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-end-0">
+                                    <i class="bi bi-person text-muted"></i>
+                                </span>
+                                <input type="text" class="form-control border-start-0 ps-0" id="register-username" placeholder="Choose a username" required>
+                            </div>
+                            <div class="form-text">This will be your public display name.</div>
                         </div>
-                        <div class="mb-3">
-                            <label for="register-password" class="form-label">Password</label>
-                            <input type="password" class="form-control" id="register-password" required>
+                        <div class="mb-4">
+                            <label for="register-password" class="form-label fw-semibold">Password</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-end-0">
+                                    <i class="bi bi-lock text-muted"></i>
+                                </span>
+                                <input type="password" class="form-control border-start-0 ps-0" id="register-password" placeholder="Create a password" required>
+                                <button class="btn btn-outline-secondary border-start-0" type="button" id="toggle-register-password">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">Use at least 8 characters with letters and numbers.</div>
                         </div>
-                        <div class="mb-3">
-                            <label for="register-password-confirm" class="form-label">Confirm Password</label>
-                            <input type="password" class="form-control" id="register-password-confirm" required>
+                        <div class="mb-4">
+                            <label for="register-password-confirm" class="form-label fw-semibold">Confirm Password</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-end-0">
+                                    <i class="bi bi-lock-fill text-muted"></i>
+                                </span>
+                                <input type="password" class="form-control border-start-0 ps-0" id="register-password-confirm" placeholder="Confirm your password" required>
+                                <button class="btn btn-outline-secondary border-start-0" type="button" id="toggle-register-password-confirm">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
                         </div>
-                        <button type="submit" class="btn btn-primary">Register</button>
+                        <div class="mb-4 form-check">
+                            <input type="checkbox" class="form-check-input" id="register-terms" required>
+                            <label class="form-check-label" for="register-terms">
+                                I agree to the <a href="#" class="text-decoration-none text-primary">Terms of Service</a> and <a href="#" class="text-decoration-none text-primary">Privacy Policy</a>
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100 py-3 fw-semibold">
+                            <i class="bi bi-person-plus me-2"></i> Create Account
+                        </button>
+                        <div class="text-center mt-4">
+                            <p class="text-muted mb-0">Already have an account?
+                                <a href="#" class="text-decoration-none fw-semibold text-primary" data-bs-toggle="modal" data-bs-target="#loginModal" data-bs-dismiss="modal">Sign in</a>
+                            </p>
+                        </div>
                     </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>

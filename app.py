@@ -41,6 +41,8 @@ todos = []
 next_id = 1
 users = []
 next_user_id = 1
+# In-memory storage for chat histories (user_id -> list of messages)
+chat_histories = {}
 
 # Proxy configuration (optional)
 PROXY_CONFIG = os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
@@ -114,6 +116,51 @@ load_users()
 
 def get_current_user_id():
     return session.get('user_id')
+
+def get_chat_history(user_id=None):
+    """Get or initialize chat history for a user."""
+    if user_id is None:
+        user_id = get_current_user_id()
+
+    # If no user_id (not logged in), use session ID as temporary identifier
+    if not user_id:
+        session_id = session.get('_id', 'anonymous')
+        user_key = f'anonymous_{session_id}'
+    else:
+        user_key = str(user_id)
+
+    if user_key not in chat_histories:
+        # Initialize with system message
+        chat_histories[user_key] = [
+            {
+                'role': 'system',
+                'content': 'You are a helpful assistant. Please provide clear and concise responses.'
+            }
+        ]
+
+    return chat_histories[user_key]
+
+def clear_chat_history(user_id=None):
+    """Clear chat history for a user."""
+    if user_id is None:
+        user_id = get_current_user_id()
+
+    if not user_id:
+        session_id = session.get('_id', 'anonymous')
+        user_key = f'anonymous_{session_id}'
+    else:
+        user_key = str(user_id)
+
+    if user_key in chat_histories:
+        # Reinitialize with just system message
+        chat_histories[user_key] = [
+            {
+                'role': 'system',
+                'content': 'You are a helpful assistant. Please provide clear and concise responses.'
+            }
+        ]
+        return True
+    return False
 
 def login_required(f):
     from functools import wraps
@@ -301,6 +348,7 @@ def get_stats():
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
 DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions'
 DEEPSEEK_MODEL = "deepseek-chat" 
+
 # Debug info about API key
 if DEEPSEEK_API_KEY:
     masked_key = DEEPSEEK_API_KEY[:8] + '...' + DEEPSEEK_API_KEY[-4:] if len(DEEPSEEK_API_KEY) > 12 else '***'
@@ -431,29 +479,37 @@ def chat():
         return jsonify({'error': 'Message is required'}), 400
 
     user_message = data['message']
+    clear_history = data.get('clear_history', False)
 
     # Log the request (without exposing full message in production)
-    print(f"AI Chat request: message length={len(user_message)}")
+    print(f"AI Chat request: message length={len(user_message)}, clear_history={clear_history}")
 
     try:
+        # Get or clear chat history
+        if clear_history:
+            clear_chat_history()
+
+        history = get_chat_history()
+
+        # Add user message to history
+        history.append({'role': 'user', 'content': user_message})
+
+        # Limit history length to avoid token overflow (keep last 10 messages + system message)
+        # System message is always at index 0
+        if len(history) > 11:  # 1 system message + 10 conversation turns
+            # Keep system message and last 10 messages (5 user + 5 assistant pairs ideally)
+            history = [history[0]] + history[-10:]
+
         headers = {
             'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
             'Content-Type': 'application/json'
         }
 
         payload = {
-            'model': 'deepseek-chat',
-            'messages': [
-                {
-                    'role': 'system',
-                    'content': 'You are a helpful assistant. Please provide clear and concise responses.'
-                },
-                {
-                    'role': 'user',
-                    'content': user_message
-                }
-            ],
-            'stream': False
+            'model': DEEPSEEK_MODEL,
+            'messages': history,
+            'stream': False,
+            'max_tokens': 1000
         }
 
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
@@ -462,9 +518,13 @@ def chat():
         result = response.json()
         ai_response = result['choices'][0]['message']['content']
 
+        # Add AI response to history
+        history.append({'role': 'assistant', 'content': ai_response})
+
         return jsonify({
             'response': ai_response,
-            'model': result['model']
+            'model': result['model'],
+            'history_length': len(history)
         })
 
     except requests.exceptions.RequestException as e:
@@ -493,6 +553,19 @@ def chat():
             return jsonify({'error': f'API request failed: {str(e)}'}), 500
     except (KeyError, IndexError) as e:
         return jsonify({'error': f'Invalid API response: {str(e)}'}), 500
+
+@app.route('/api/chat/clear', methods=['POST'])
+def clear_chat():
+    """Clear the chat history for the current user."""
+    try:
+        success = clear_chat_history()
+        if success:
+            return jsonify({'message': 'Chat history cleared successfully'})
+        else:
+            return jsonify({'message': 'No chat history to clear'})
+    except Exception as e:
+        print(f"Error clearing chat history: {e}")
+        return jsonify({'error': f'Failed to clear chat history: {str(e)}'}), 500
 
 
 if __name__ == '__main__':
