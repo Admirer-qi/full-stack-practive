@@ -3,30 +3,43 @@ import json
 import os
 from datetime import datetime
 import requests
-from werkzeug.security import generate_password_hash, check_password_hash
+# werkzeug.security is now used inside UserRepository
 
-# Try to load dotenv for .env file support
-try:
-    from dotenv import load_dotenv
-    dotenv_available = True
-except ImportError:
-    dotenv_available = False
-    print("Warning: python-dotenv not installed. .env files will not be loaded.")
-    print("   Install with: pip install python-dotenv")
+def load_env_file():
+    """加载.env文件中的环境变量"""
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    # 移除值中的引号
+                    if value and value[0] in ('"', "'") and value[-1] == value[0]:
+                        value = value[1:-1]
+                    os.environ[key] = value
+        print(f"OK - Loaded environment variables from {env_path}")
+    else:
+        print("Info: No .env file found, using system environment variables")
+
+# 加载.env文件
+load_env_file()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
 
-# Load environment variables from .env file if it exists and dotenv is available
-if dotenv_available:
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(env_path):
-        load_dotenv(env_path)
-        print(f"OK - Loaded environment variables from {env_path}")
-    else:
-        print("Info: No .env file found, using system environment variables")
-else:
-    print("Info: Using system environment variables (dotenv not available)")
+# 数据库配置
+try:
+    from database import init_app as init_database
+    from repository import UserRepository, TodoRepository
+    init_database(app)
+    print("OK - Database initialized")
+except ImportError as e:
+    print(f"Error importing database modules: {e}")
+    print("Make sure Flask-SQLAlchemy and PyMySQL are installed")
+    raise
 
 # Enable CORS for all routes
 @app.after_request
@@ -36,11 +49,6 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# In-memory storage for todos
-todos = []
-next_id = 1
-users = []
-next_user_id = 1
 # In-memory storage for chat histories (user_id -> list of messages)
 chat_histories = {}
 
@@ -50,74 +58,6 @@ if PROXY_CONFIG:
     print(f"Proxy configuration detected: {PROXY_CONFIG}")
     # Note: Requests will automatically use HTTP_PROXY/HTTPS_PROXY environment variables
 
-# Load todos from JSON file if exists
-DATA_FILE = 'data/todos.json'
-USERS_FILE = 'data/users.json'
-
-def load_users():
-    global users, next_user_id
-    if os.path.exists(USERS_FILE):
-        try:
-            with open(USERS_FILE, 'r') as f:
-                data = json.load(f)
-                users = data.get('users', [])
-                if users:
-                    next_user_id = max(user['id'] for user in users) + 1
-                else:
-                    next_user_id = 1
-            print(f"Loaded {len(users)} users from {USERS_FILE}")
-        except Exception as e:
-            print(f"Error loading users: {e}")
-            users = []
-            next_user_id = 1
-
-def save_users():
-    try:
-        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-        with open(USERS_FILE, 'w') as f:
-            json.dump({'users': users}, f, indent=2)
-        print(f"Saved {len(users)} users to {USERS_FILE}")
-    except Exception as e:
-        print(f"Error saving users: {e}")
-
-def load_todos():
-    global todos, next_id
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r') as f:
-                data = json.load(f)
-                todos = data.get('todos', [])
-                # Ensure each todo has a user_id field (default 0 for old todos)
-                for todo in todos:
-                    if 'user_id' not in todo:
-                        todo['user_id'] = 0
-                    # Ensure each todo has due_date and tags fields (for backward compatibility)
-                    if 'due_date' not in todo:
-                        todo['due_date'] = None
-                    if 'tags' not in todo:
-                        todo['tags'] = []
-                if todos:
-                    next_id = max(todo['id'] for todo in todos) + 1
-                else:
-                    next_id = 1
-            print(f"Loaded {len(todos)} todos from {DATA_FILE}")
-        except Exception as e:
-            print(f"Error loading todos: {e}")
-            todos = []
-            next_id = 1
-
-def save_todos():
-    try:
-        os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-        with open(DATA_FILE, 'w') as f:
-            json.dump({'todos': todos}, f, indent=2)
-        print(f"Saved {len(todos)} todos to {DATA_FILE}")
-    except Exception as e:
-        print(f"Error saving todos: {e}")
-
-# Load todos on startup
-load_todos()
-load_users()
 
 def get_current_user_id():
     return session.get('user_id')
@@ -191,29 +131,21 @@ def register():
     if not username or not password:
         return jsonify({'error': 'Username and password cannot be empty'}), 400
 
-    # Check if username already exists
-    if any(user['username'] == username for user in users):
-        return jsonify({'error': 'Username already exists'}), 409
-
-    global next_user_id
-    user_id = next_user_id
-    next_user_id += 1
-
-    user = {
-        'id': user_id,
-        'username': username,
-        'password_hash': generate_password_hash(password)
-    }
-
-    users.append(user)
-    save_users()
+    # Check if username already exists using repository
+    try:
+        user = UserRepository.create(username, password)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 409
+    except Exception as e:
+        print(f"Error creating user: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
     # Log the user in
-    session['user_id'] = user_id
+    session['user_id'] = user.id
 
     return jsonify({
-        'id': user_id,
-        'username': username
+        'id': user.id,
+        'username': user.username
     }), 201
 
 @app.route('/api/login', methods=['POST'])
@@ -225,14 +157,14 @@ def login():
     username = data['username'].strip()
     password = data['password']
 
-    user = next((u for u in users if u['username'] == username), None)
-    if not user or not check_password_hash(user['password_hash'], password):
+    user = UserRepository.authenticate(username, password)
+    if not user:
         return jsonify({'error': 'Invalid username or password'}), 401
 
-    session['user_id'] = user['id']
+    session['user_id'] = user.id
     return jsonify({
-        'id': user['id'],
-        'username': user['username']
+        'id': user.id,
+        'username': user.username
     })
 
 @app.route('/api/logout', methods=['POST'])
@@ -246,14 +178,14 @@ def get_current_user():
     if not user_id:
         return jsonify({'error': 'Not authenticated'}), 401
 
-    user = next((u for u in users if u['id'] == user_id), None)
+    user = UserRepository.get_by_id(user_id)
     if not user:
         session.pop('user_id', None)
         return jsonify({'error': 'User not found'}), 404
 
     return jsonify({
-        'id': user['id'],
-        'username': user['username']
+        'id': user.id,
+        'username': user.username
     })
 
 @app.route('/')
@@ -265,116 +197,109 @@ def index():
 @login_required
 def get_todos():
     user_id = get_current_user_id()
-    user_todos = [t for t in todos if t.get('user_id') == user_id]
 
-    # Sort by due_date (None values last), then by created_at
-    def sort_key(todo):
-        due_date = todo.get('due_date')
-        if due_date is None:
-            return ('9999-12-31', todo.get('created_at', ''))
-        return (due_date, todo.get('created_at', ''))
+    # 获取用户的待办事项（已经按due_date和created_at排序）
+    todos_list = TodoRepository.get_with_tags(user_id)
 
-    user_todos.sort(key=sort_key)
-    return jsonify(user_todos)
+    # 转换为字典格式
+    todos_data = [todo.to_dict() for todo in todos_list]
+
+    return jsonify(todos_data)
 
 @app.route('/api/todos', methods=['POST'])
 @login_required
 def create_todo():
-    global next_id
     user_id = get_current_user_id()
     data = request.get_json()
 
     if not data or 'title' not in data:
         return jsonify({'error': 'Title is required'}), 400
 
-    # Validate tags if provided
-    tags = data.get('tags', [])
-    if tags:
-        # Ensure tags are valid (only work, study, life allowed)
-        valid_tags = ['work', 'study', 'life']
-        tags = [tag for tag in tags if tag in valid_tags]
+    try:
+        # 处理due_date格式转换
+        due_date = data.get('due_date')
+        if due_date:
+            try:
+                due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'error': 'Invalid due_date format. Use YYYY-MM-DD'}), 400
+        else:
+            due_date = None
 
-    todo = {
-        'id': next_id,
-        'user_id': user_id,
-        'title': data['title'],
-        'description': data.get('description', ''),
-        'due_date': data.get('due_date', None),
-        'tags': tags,
-        'completed': False,
-        'created_at': datetime.now().isoformat()
-    }
+        # 创建待办事项
+        todo = TodoRepository.create(
+            user_id=user_id,
+            title=data['title'],
+            description=data.get('description', ''),
+            due_date=due_date,
+            tags=data.get('tags', [])
+        )
 
-    todos.append(todo)
-    next_id += 1
-    save_todos()
+        return jsonify(todo.to_dict()), 201
 
-    return jsonify(todo), 201
+    except Exception as e:
+        print(f"Error creating todo: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/api/todos/<int:todo_id>', methods=['GET'])
 @login_required
 def get_todo(todo_id):
     user_id = get_current_user_id()
-    todo = next((t for t in todos if t['id'] == todo_id and t.get('user_id') == user_id), None)
-    if todo is None:
+    todo = TodoRepository.get_by_id(todo_id, user_id)
+    if not todo:
         return jsonify({'error': 'Todo not found'}), 404
-    return jsonify(todo)
+    return jsonify(todo.to_dict())
 
 @app.route('/api/todos/<int:todo_id>', methods=['PUT'])
 @login_required
 def update_todo(todo_id):
     data = request.get_json()
     user_id = get_current_user_id()
-    todo = next((t for t in todos if t['id'] == todo_id and t.get('user_id') == user_id), None)
 
-    if todo is None:
+    # 准备更新参数
+    update_data = {}
+
+    if 'title' in data:
+        update_data['title'] = data['title']
+    if 'description' in data:
+        update_data['description'] = data['description']
+    if 'due_date' in data:
+        due_date = data['due_date']
+        if due_date:
+            try:
+                due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'error': 'Invalid due_date format. Use YYYY-MM-DD'}), 400
+        update_data['due_date'] = due_date
+    if 'tags' in data:
+        update_data['tags'] = data['tags']
+    if 'completed' in data:
+        update_data['completed'] = data['completed']
+
+    # 更新待办事项
+    todo = TodoRepository.update(todo_id, user_id, **update_data)
+    if not todo:
         return jsonify({'error': 'Todo not found'}), 404
 
-    # Update fields if provided
-    if 'title' in data:
-        todo['title'] = data['title']
-    if 'description' in data:
-        todo['description'] = data['description']
-    if 'due_date' in data:
-        todo['due_date'] = data['due_date']
-    if 'tags' in data:
-        # Validate tags
-        valid_tags = ['work', 'study', 'life']
-        tags = [tag for tag in data['tags'] if tag in valid_tags]
-        todo['tags'] = tags
-    if 'completed' in data:
-        todo['completed'] = data['completed']
-
-    save_todos()
-    return jsonify(todo)
+    return jsonify(todo.to_dict())
 
 @app.route('/api/todos/<int:todo_id>', methods=['DELETE'])
 @login_required
 def delete_todo(todo_id):
-    global todos
     user_id = get_current_user_id()
-    initial_length = len(todos)
-    todos = [t for t in todos if not (t['id'] == todo_id and t.get('user_id') == user_id)]
 
-    if len(todos) == initial_length:
+    success = TodoRepository.delete(todo_id, user_id)
+    if not success:
         return jsonify({'error': 'Todo not found'}), 404
 
-    save_todos()
     return jsonify({'message': 'Todo deleted successfully'}), 200
 
 @app.route('/api/stats', methods=['GET'])
 @login_required
 def get_stats():
     user_id = get_current_user_id()
-    user_todos = [t for t in todos if t.get('user_id') == user_id]
-    total = len(user_todos)
-    completed = sum(1 for t in user_todos if t['completed'])
-    active = total - completed
-    return jsonify({
-        'total': total,
-        'completed': completed,
-        'active': active
-    })
+    stats = TodoRepository.get_stats(user_id)
+    return jsonify(stats)
 
 # DeepSeek AI Chat API Integration
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
@@ -608,5 +533,5 @@ def clear_chat():
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=True)
     

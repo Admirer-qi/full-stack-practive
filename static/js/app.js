@@ -10,12 +10,34 @@ let todos = [];
 const todoForm = document.getElementById('todo-form');
 const titleInput = document.getElementById('title');
 const descriptionInput = document.getElementById('description');
+const dueDateInput = document.getElementById('due-date');
 const todoList = document.getElementById('todo-list');
 const noTodosElement = document.getElementById('no-todos');
 const filterButtons = document.querySelectorAll('[data-filter]');
 const totalCountEl = document.getElementById('total-count');
 const activeCountEl = document.getElementById('active-count');
 const completedCountEl = document.getElementById('completed-count');
+
+// Helper functions
+function formatDate(dateString) {
+    if (!dateString) return null;
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+    });
+}
+
+
+function isOverdue(dueDate) {
+    if (!dueDate) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const due = new Date(dueDate);
+    due.setHours(0, 0, 0, 0);
+    return due < today;
+}
 
 // Initialize the app
 document.addEventListener('DOMContentLoaded', () => {
@@ -35,6 +57,50 @@ function setupEventListeners() {
             setFilter(filter);
         });
     });
+
+    // Tag radio buttons - ensure single selection and visual sync
+    const tagButtonGroup = document.querySelector('.btn-group[data-bs-toggle="buttons"]');
+    if (tagButtonGroup) {
+        // Initialize visual state based on current radio states
+        function syncTagButtonsVisualState() {
+            document.querySelectorAll('input[name="todo-tag"]').forEach(radio => {
+                const label = document.querySelector(`label[for="${radio.id}"]`);
+                if (label) {
+                    if (radio.checked) {
+                        label.classList.add('active');
+                        label.setAttribute('aria-pressed', 'true');
+                    } else {
+                        label.classList.remove('active');
+                        label.setAttribute('aria-pressed', 'false');
+                    }
+                }
+            });
+        }
+
+        // Initial sync
+        syncTagButtonsVisualState();
+
+        // Add change event listeners to radios
+        document.querySelectorAll('input[name="todo-tag"]').forEach(radio => {
+            radio.addEventListener('change', syncTagButtonsVisualState);
+        });
+
+        // Handle click on button group to ensure proper radio selection
+        tagButtonGroup.addEventListener('click', (e) => {
+            // Check if a label was clicked
+            const label = e.target.closest('label[for^="tag-"]');
+            if (label) {
+                const radioId = label.getAttribute('for');
+                const radio = document.getElementById(radioId);
+                if (radio && radio.type === 'radio') {
+                    // Manually check the radio
+                    radio.checked = true;
+                    // Trigger change event
+                    radio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+        });
+    }
 }
 
 // API Functions
@@ -152,46 +218,122 @@ function renderTodos() {
 }
 
 function createTodoElement(todo) {
+    // Determine primary tag for background color (use first tag if exists)
+    const primaryTag = todo.tags && todo.tags.length > 0 ? todo.tags[0] : null;
+
     const div = document.createElement('div');
-    div.className = `todo-item list-group-item ${todo.completed ? 'completed' : ''}`;
+    div.className = `todo-item ${todo.completed ? 'completed' : ''} ${primaryTag ? `tag-${primaryTag}` : ''}`;
     div.setAttribute('data-id', todo.id);
 
-    const createdAt = new Date(todo.created_at).toLocaleDateString();
+    const createdAt = formatDate(todo.created_at) || new Date(todo.created_at).toLocaleDateString();
+    const dueDate = formatDate(todo.due_date);
+    const isOverdueFlag = !todo.completed && isOverdue(todo.due_date);
+    const hasDueDate = !!todo.due_date;
+    const hasTags = todo.tags && todo.tags.length > 0;
+    const hasDescription = todo.description && todo.description.trim().length > 0;
+
+    // Create tags HTML
+    let tagsHtml = '';
+    if (hasTags) {
+        tagsHtml = `
+            <div class="todo-tags">
+                ${todo.tags.map(tag => `
+                    <span class="todo-tag ${tag}">${tag === 'work' ? 'Work' : tag === 'study' ? 'Study' : 'Life'}</span>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    // Create due date HTML
+    let dueDateHtml = '';
+    if (hasDueDate) {
+        const overdueClass = isOverdueFlag ? 'overdue' : '';
+        dueDateHtml = `
+            <span class="todo-due-date ${overdueClass}">
+                <i class="bi bi-calendar${isOverdueFlag ? '-exclamation' : ''}"></i>
+                ${dueDate}${isOverdueFlag ? ' (Overdue!)' : ''}
+            </span>
+        `;
+    }
 
     div.innerHTML = `
-        <div class="d-flex justify-content-between align-items-start">
-            <div class="flex-grow-1">
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox"
-                           ${todo.completed ? 'checked' : ''}
-                           id="check-${todo.id}">
-                    <label class="form-check-label" for="check-${todo.id}">
-                        <h6 class="todo-title mb-1">${escapeHtml(todo.title)}</h6>
-                    </label>
+        <div class="todo-summary" style="cursor: pointer;">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="flex-grow-1">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox"
+                               ${todo.completed ? 'checked' : ''}
+                               id="check-${todo.id}">
+                        <label class="form-check-label" for="check-${todo.id}">
+                            <h6 class="todo-title mb-1">${escapeHtml(todo.title)}</h6>
+                        </label>
+                    </div>
+                    ${tagsHtml}
+                    <div class="d-flex align-items-center flex-wrap">
+                        ${dueDateHtml}
+                    </div>
+                    ${hasDescription ? `<p class="todo-description mb-1 mt-2">${escapeHtml(todo.description.substring(0, 100))}${todo.description.length > 100 ? '...' : ''}</p>` : ''}
                 </div>
-                ${todo.description ? `<p class="todo-description mb-1">${escapeHtml(todo.description)}</p>` : ''}
-                <small class="todo-meta">Created: ${createdAt}</small>
+                <div class="todo-actions ms-3">
+                    <button class="btn btn-sm ${todo.completed ? 'btn-outline-warning' : 'btn-outline-success'} toggle-btn"
+                            title="${todo.completed ? 'Mark as active' : 'Mark as completed'}">
+                        <i class="bi ${todo.completed ? 'bi-arrow-counterclockwise' : 'bi-check'}"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger delete-btn" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
             </div>
-            <div class="todo-actions ms-3">
-                <button class="btn btn-sm ${todo.completed ? 'btn-outline-warning' : 'btn-outline-success'} toggle-btn"
-                        title="${todo.completed ? 'Mark as active' : 'Mark as completed'}">
-                    <i class="bi ${todo.completed ? 'bi-arrow-counterclockwise' : 'bi-check'}"></i>
-                </button>
-                <button class="btn btn-sm btn-outline-danger delete-btn" title="Delete">
-                    <i class="bi bi-trash"></i>
-                </button>
+        </div>
+        <div class="todo-details">
+            ${hasDescription && todo.description.length > 100 ? `
+                <div class="todo-full-description">
+                    <strong>Full Description:</strong><br>
+                    ${escapeHtml(todo.description)}
+                </div>
+            ` : ''}
+            <div class="todo-metadata">
+                <div class="todo-metadata-item">
+                    <i class="bi bi-clock"></i>
+                    <span>Created: ${createdAt}</span>
+                </div>
+                ${hasDueDate ? `
+                    <div class="todo-metadata-item">
+                        <i class="bi bi-calendar${isOverdueFlag ? '-exclamation' : ''}"></i>
+                        <span>Due: ${dueDate}${isOverdueFlag ? ' <span class="due-date-warning">(Overdue!)</span>' : ''}</span>
+                    </div>
+                ` : ''}
+                ${hasTags ? `
+                    <div class="todo-metadata-item">
+                        <i class="bi bi-tags"></i>
+                        <span>Tags: ${todo.tags.map(tag => tag === 'work' ? 'Work' : tag === 'study' ? 'Study' : 'Life').join(', ')}</span>
+                    </div>
+                ` : ''}
+                <div class="todo-metadata-item">
+                    <i class="bi ${todo.completed ? 'bi-check-circle text-success' : 'bi-circle text-warning'}"></i>
+                    <span>Status: ${todo.completed ? 'Completed' : 'Active'}</span>
+                </div>
             </div>
         </div>
     `;
 
-    // Add event listeners to the buttons
+    // Add event listeners
     const checkbox = div.querySelector(`#check-${todo.id}`);
     const toggleBtn = div.querySelector('.toggle-btn');
     const deleteBtn = div.querySelector('.delete-btn');
+    const summary = div.querySelector('.todo-summary');
 
     checkbox.addEventListener('change', () => toggleTodoCompletion(todo.id, checkbox.checked));
     toggleBtn.addEventListener('click', () => toggleTodoCompletion(todo.id, !todo.completed));
     deleteBtn.addEventListener('click', () => deleteTodoHandler(todo.id));
+
+    // Toggle expanded view on summary click (but not on checkbox or buttons)
+    summary.addEventListener('click', (e) => {
+        if (e.target.closest('.form-check-input') || e.target.closest('.todo-actions')) {
+            return; // Don't expand when clicking checkbox or action buttons
+        }
+        div.classList.toggle('expanded');
+    });
 
     return div;
 }
@@ -232,9 +374,20 @@ async function handleAddTodo(e) {
         return;
     }
 
+    // Get selected tag (single selection only)
+    const selectedTags = [];
+    document.querySelectorAll('.btn-check:checked').forEach(radio => {
+        selectedTags.push(radio.value);
+    });
+
+    // Get due date (if provided)
+    let dueDate = dueDateInput.value ? dueDateInput.value : null;
+
     const todoData = {
         title: title,
-        description: descriptionInput.value.trim()
+        description: descriptionInput.value.trim(),
+        due_date: dueDate,
+        tags: selectedTags
     };
 
     try {
@@ -243,6 +396,16 @@ async function handleAddTodo(e) {
         // Clear form
         titleInput.value = '';
         descriptionInput.value = '';
+        dueDateInput.value = '';
+        // Uncheck all tag radios and reset button styles
+        document.querySelectorAll('.btn-check').forEach(checkbox => {
+            checkbox.checked = false;
+            const label = document.querySelector(`label[for="${checkbox.id}"]`);
+            if (label) {
+                label.classList.remove('active');
+                label.setAttribute('aria-pressed', 'false');
+            }
+        });
 
         // Reload todos
         loadTodos();

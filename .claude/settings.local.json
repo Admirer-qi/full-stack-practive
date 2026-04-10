@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(set PYTHONIOENCODING=utf-8)",
+      "Bash(python migrate_json_to_mysql.py)",
+      "Bash(python app.py)"
+    ]
+  }
+}
