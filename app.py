@@ -49,8 +49,7 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# In-memory storage for chat histories (user_id -> list of messages)
-chat_histories = {}
+# Chat histories are now stored in database table chat_histories
 
 # Proxy configuration (optional)
 PROXY_CONFIG = os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
@@ -62,8 +61,10 @@ if PROXY_CONFIG:
 def get_current_user_id():
     return session.get('user_id')
 
-def get_chat_history(user_id=None):
-    """Get or initialize chat history for a user."""
+def get_chat_history(user_id=None, endpoint='chat'):
+    """Get or initialize chat history for a user from database."""
+    from repository import ChatHistoryRepository
+
     if user_id is None:
         user_id = get_current_user_id()
 
@@ -74,20 +75,25 @@ def get_chat_history(user_id=None):
     else:
         user_key = str(user_id)
 
-    if user_key not in chat_histories:
-        # Initialize with system message with current date context
+    # 从数据库获取消息
+    messages = ChatHistoryRepository.get_messages_for_ai(user_key, endpoint, max_messages=10)
+
+    # 如果没有消息，添加系统消息
+    if not messages:
         current_date = datetime.now().strftime('%B %d, %Y')
-        chat_histories[user_key] = [
-            {
-                'role': 'system',
-                'content': f"You are a helpful assistant. Context: The current real-world date is {current_date}. When answering questions that involve dates, times, or temporal information, use {current_date} as your reference point. However, DO NOT mention the date unless specifically asked about it. Only provide the date when the user explicitly asks about today's date, the current time, or similar time-related queries. For example, if asked 'what is today's date?' respond with 'Today is {current_date}.' but otherwise don't volunteer date information. Your training data may contain outdated date references - ignore those and use {current_date} when date information is relevant to the question."
-            }
-        ]
+        system_content = f"You are a helpful assistant. Context: The current real-world date is {current_date}. When answering questions that involve dates, times, or temporal information, use {current_date} as your reference point. However, DO NOT mention the date unless specifically asked about it. Only provide the date when the user explicitly asks about today's date, the current time, or similar time-related queries. For example, if asked 'what is today's date?' respond with 'Today is {current_date}.' but otherwise don't volunteer date information. Your training data may contain outdated date references - ignore those and use {current_date} when date information is relevant to the question."
 
-    return chat_histories[user_key]
+        ChatHistoryRepository.add_system_message(user_key, system_content, endpoint)
 
-def clear_chat_history(user_id=None):
-    """Clear chat history for a user."""
+        # 重新获取消息
+        messages = ChatHistoryRepository.get_messages_for_ai(user_key, endpoint, max_messages=10)
+
+    return messages
+
+def clear_chat_history(user_id=None, endpoint=None):
+    """Clear chat history for a user from database."""
+    from repository import ChatHistoryRepository
+
     if user_id is None:
         user_id = get_current_user_id()
 
@@ -97,17 +103,16 @@ def clear_chat_history(user_id=None):
     else:
         user_key = str(user_id)
 
-    if user_key in chat_histories:
-        # Reinitialize with just system message with current date context
-        current_date = datetime.now().strftime('%B %d, %Y')
-        chat_histories[user_key] = [
-            {
-                'role': 'system',
-                'content': f"You are a helpful assistant. Context: The current real-world date is {current_date}. When answering questions that involve dates, times, or temporal information, use {current_date} as your reference point. However, DO NOT mention the date unless specifically asked about it. Only provide the date when the user explicitly asks about today's date, the current time, or similar time-related queries. For example, if asked 'what is today's date?' respond with 'Today is {current_date}.' but otherwise don't volunteer date information. Your training data may contain outdated date references - ignore those and use {current_date} when date information is relevant to the question."
-            }
-        ]
-        return True
-    return False
+    # 清除数据库中的历史记录
+    deleted_count = ChatHistoryRepository.clear_history(user_key, endpoint)
+
+    # 重新添加系统消息
+    current_date = datetime.now().strftime('%B %d, %Y')
+    system_content = f"You are a helpful assistant. Context: The current real-world date is {current_date}. When answering questions that involve dates, times, or temporal information, use {current_date} as your reference point. However, DO NOT mention the date unless specifically asked about it. Only provide the date when the user explicitly asks about today's date, the current time, or similar time-related queries. For example, if asked 'what is today's date?' respond with 'Today is {current_date}.' but otherwise don't volunteer date information. Your training data may contain outdated date references - ignore those and use {current_date} when date information is relevant to the question."
+
+    ChatHistoryRepository.add_system_message(user_key, system_content, endpoint or 'chat')
+
+    return deleted_count > 0
 
 def login_required(f):
     from functools import wraps
@@ -116,6 +121,51 @@ def login_required(f):
         if not get_current_user_id():
             return jsonify({'error': 'Authentication required'}), 401
         return f(*args, **kwargs)
+    return decorated_function
+
+
+def ai_agent_limit(f):
+    """
+    装饰器：限制AI代理调用速率和每日次数
+    要求：用户必须已登录（与login_required一起使用）
+    """
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        from repository import AiAgentCallRepository
+
+        user_id = get_current_user_id()
+        if not user_id:
+            # 理论上不会发生，因为login_required会先检查
+            return jsonify({'error': 'Authentication required'}), 401
+
+        # 获取客户端IP地址
+        ip_address = request.remote_addr
+
+        # 检查限制
+        can_call, error_msg = AiAgentCallRepository.can_make_call(
+            user_id=user_id,
+            ip_address=ip_address,
+            rate_limit_per_minute=10,  # 每分钟最多10次
+            daily_limit=100  # 每天最多100次
+        )
+
+        if not can_call:
+            return jsonify({'error': error_msg}), 429
+
+        # 执行被装饰的函数
+        try:
+            result = f(*args, **kwargs)
+            # 如果函数返回的是Flask响应，记录调用
+            # 注意：这里假设函数返回的是Flask响应对象或元组
+            # 但为了简单，我们直接记录调用
+            AiAgentCallRepository.record_call(user_id, ip_address, 'todo_agent')
+            return result
+        except Exception as e:
+            # 即使发生错误也记录调用（因为用户已经消耗了一次调用）
+            AiAgentCallRepository.record_call(user_id, ip_address, 'todo_agent')
+            raise e
+
     return decorated_function
 
 # Authentication routes
@@ -435,33 +485,38 @@ def chat():
     if not data or 'message' not in data:
         return jsonify({'error': 'Message is required'}), 400
 
-    user_message = data['message']
+    user_message = data['message'].strip()
     clear_history = data.get('clear_history', False)
 
-    # Log the request (without exposing full message in production)
+    # Log the request
     print(f"AI Chat request: message length={len(user_message)}, clear_history={clear_history}")
 
     try:
-        # Get or clear chat history
+        from repository import ChatHistoryRepository
+
+        # 获取用户标识符
+        user_id = get_current_user_id()
+        if not user_id:
+            session_id = session.get('_id', 'anonymous')
+            user_key = f'anonymous_{session_id}'
+        else:
+            user_key = str(user_id)
+
+        # 清除历史（如果需要）
         if clear_history:
-            clear_chat_history()
+            clear_chat_history(user_id, 'chat')
 
-        history = get_chat_history()
-
-        # Update system message with current date context
+        # 更新系统消息中的日期
         current_date = datetime.now().strftime('%B %d, %Y')
-        if history and history[0]['role'] == 'system':
-            # Update the system message with current date context
-            history[0]['content'] = f"You are a helpful assistant. Context: The current real-world date is {current_date}. When answering questions that involve dates, times, or temporal information, use {current_date} as your reference point. However, DO NOT mention the date unless specifically asked about it. Only provide the date when the user explicitly asks about today's date, the current time, or similar time-related queries. For example, if asked 'what is today's date?' respond with 'Today is {current_date}.' but otherwise don't volunteer date information. Your training data may contain outdated date references - ignore those and use {current_date} when date information is relevant to the question."
+        system_content = f"You are a helpful assistant. Context: The current real-world date is {current_date}. When answering questions that involve dates, times, or temporal information, use {current_date} as your reference point. However, DO NOT mention the date unless specifically asked about it. Only provide the date when the user explicitly asks about today's date, the current time, or similar time-related queries. For example, if asked 'what is today's date?' respond with 'Today is {current_date}.' but otherwise don't volunteer date information. Your training data may contain outdated date references - ignore those and use {current_date} when date information is relevant to the question."
 
-        # Add user message to history
-        history.append({'role': 'user', 'content': user_message})
+        ChatHistoryRepository.add_system_message(user_key, system_content, 'chat')
 
-        # Limit history length to avoid token overflow (keep last 10 messages + system message)
-        # System message is always at index 0
-        if len(history) > 11:  # 1 system message + 10 conversation turns
-            # Keep system message and last 10 messages (5 user + 5 assistant pairs ideally)
-            history = [history[0]] + history[-10:]
+        # 添加用户消息到数据库
+        ChatHistoryRepository.add_message(user_key, 'user', user_message, 'chat')
+
+        # 获取完整的对话历史（用于AI API）
+        history = ChatHistoryRepository.get_messages_for_ai(user_key, 'chat', max_messages=10)
 
         headers = {
             'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
@@ -481,13 +536,16 @@ def chat():
         result = response.json()
         ai_response = result['choices'][0]['message']['content']
 
-        # Add AI response to history
-        history.append({'role': 'assistant', 'content': ai_response})
+        # 添加AI响应到数据库
+        ChatHistoryRepository.add_message(user_key, 'assistant', ai_response, 'chat')
+
+        # 获取更新后的历史长度
+        history_count = ChatHistoryRepository.get_messages(user_key, 'chat', limit=None)
 
         return jsonify({
             'response': ai_response,
             'model': result['model'],
-            'history_length': len(history)
+            'history_length': len(history_count)
         })
 
     except requests.exceptions.RequestException as e:
@@ -529,6 +587,286 @@ def clear_chat():
     except Exception as e:
         print(f"Error clearing chat history: {e}")
         return jsonify({'error': f'Failed to clear chat history: {str(e)}'}), 500
+
+
+# AI Todo Agent
+@app.route('/api/ai/todo-agent', methods=['POST'])
+@login_required
+@ai_agent_limit
+def todo_agent():
+    """
+    AI自动管理待办事项代理
+    接收自然语言指令，解析并执行相应的待办事项操作
+    """
+    from repository import TodoRepository, AiAgentCallRepository
+
+    data = request.get_json()
+    if not data or 'message' not in data:
+        return jsonify({'error': 'Message is required'}), 400
+
+    user_message = data['message'].strip()
+    user_id = get_current_user_id()
+
+    if not user_message:
+        return jsonify({'error': 'Message cannot be empty'}), 400
+
+    # 检查API密钥是否配置
+    if not DEEPSEEK_API_KEY:
+        return jsonify({'error': 'DeepSeek API key not configured'}), 500
+
+    # 获取用户现有的待办事项列表，作为上下文提供给AI
+    todos = TodoRepository.get_all_by_user(user_id)
+    todos_context = [{'id': t.id, 'title': t.title, 'completed': t.completed} for t in todos[:10]]  # 最多10条
+
+    # 构建系统提示词，要求AI返回JSON格式的操作指令
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    system_prompt = f"""You are an AI assistant that helps manage todo items for a user.
+Current date: {current_date}
+User ID: {user_id}
+
+The user will give you instructions about managing their todo list. You need to understand their intent and return a JSON object with the following structure:
+
+{{
+  "intent": "create_todo|update_todo|delete_todo|list_todos|mark_complete|mark_incomplete|get_todo",
+  "parameters": {{
+    // 根据意图的不同，参数也不同
+  }}
+}}
+
+Possible intents and their parameters:
+1. create_todo: Create a new todo item.
+   Parameters: title (required), description (optional), due_date (optional, format: YYYY-MM-DD), tags (optional array of strings: 'work', 'study', 'life', 'health', 'fitness', 'sports', 'shopping', 'personal', 'urgent', 'important')
+
+2. update_todo: Update an existing todo item.
+   Parameters: todo_id (required), title (optional), description (optional), due_date (optional, format: YYYY-MM-DD), tags (optional), completed (optional boolean)
+
+3. delete_todo: Delete a todo item.
+   Parameters: todo_id (required)
+
+4. list_todos: List todo items (filtering options).
+   Parameters: filter (optional: 'all', 'active', 'completed', 'tag:<tag>'), limit (optional, default 10)
+
+5. mark_complete: Mark a todo item as completed.
+   Parameters: todo_id (required)
+
+6. mark_incomplete: Mark a todo item as incomplete (active).
+   Parameters: todo_id (required)
+
+7. get_todo: Get details of a specific todo item.
+   Parameters: todo_id (required)
+
+Important rules:
+- Only operate on the user's own todos (user_id = {user_id}).
+- For update/delete/mark operations, you must verify the todo_id belongs to the user.
+- If the user asks something not related to todo management, respond with intent "chat" and a "response" parameter with helpful message.
+- If the intent is unclear, ask for clarification with intent "clarify" and a "question" parameter.
+- Always return valid JSON.
+
+Existing todos (for reference):
+{json.dumps(todos_context)}
+
+User's message: "{user_message}"
+
+Respond ONLY with the JSON object, nothing else."""
+
+    try:
+        # 调用DeepSeek API
+        headers = {
+            'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+
+        payload = {
+            'model': DEEPSEEK_MODEL,
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_message}
+            ],
+            'stream': False,
+            'max_tokens': 1000,
+            'temperature': 0.1  # 低温度以确保结构化输出
+        }
+
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+
+        result = response.json()
+        ai_response = result['choices'][0]['message']['content']
+
+        # 解析AI返回的JSON
+        import json as json_module
+        try:
+            action = json_module.loads(ai_response.strip())
+        except json_module.JSONDecodeError as e:
+            print(f"Failed to parse AI response as JSON: {ai_response}")
+            return jsonify({
+                'error': 'AI returned invalid JSON',
+                'raw_response': ai_response[:200]
+            }), 500
+
+        intent = action.get('intent')
+        parameters = action.get('parameters', {})
+
+        # 根据意图执行相应的操作
+        result_data = {'intent': intent, 'parameters': parameters, 'success': True}
+
+        if intent == 'create_todo':
+            # 创建待办事项
+            title = parameters.get('title')
+            if not title:
+                return jsonify({'error': 'Title is required for creating todo'}), 400
+
+            due_date = parameters.get('due_date')
+            if due_date:
+                try:
+                    due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
+                except ValueError:
+                    return jsonify({'error': 'Invalid due_date format. Use YYYY-MM-DD'}), 400
+
+            todo = TodoRepository.create(
+                user_id=user_id,
+                title=title,
+                description=parameters.get('description', ''),
+                due_date=due_date,
+                tags=parameters.get('tags', [])
+            )
+            result_data['todo'] = todo.to_dict()
+            result_data['message'] = f'Todo created successfully (ID: {todo.id})'
+
+        elif intent == 'update_todo':
+            todo_id = parameters.get('todo_id')
+            if not todo_id:
+                return jsonify({'error': 'todo_id is required for updating todo'}), 400
+
+            # 检查待办事项是否存在且属于当前用户
+            todo = TodoRepository.get_by_id(todo_id, user_id)
+            if not todo:
+                return jsonify({'error': f'Todo not found or access denied (ID: {todo_id})'}), 404
+
+            update_data = {}
+            if 'title' in parameters:
+                update_data['title'] = parameters['title']
+            if 'description' in parameters:
+                update_data['description'] = parameters['description']
+            if 'due_date' in parameters:
+                due_date = parameters['due_date']
+                if due_date:
+                    try:
+                        due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
+                    except ValueError:
+                        return jsonify({'error': 'Invalid due_date format. Use YYYY-MM-DD'}), 400
+                update_data['due_date'] = due_date
+            if 'tags' in parameters:
+                update_data['tags'] = parameters['tags']
+            if 'completed' in parameters:
+                update_data['completed'] = parameters['completed']
+
+            updated_todo = TodoRepository.update(todo_id, user_id, **update_data)
+            if not updated_todo:
+                return jsonify({'error': 'Failed to update todo'}), 500
+
+            result_data['todo'] = updated_todo.to_dict()
+            result_data['message'] = f'Todo updated successfully (ID: {todo_id})'
+
+        elif intent == 'delete_todo':
+            todo_id = parameters.get('todo_id')
+            if not todo_id:
+                return jsonify({'error': 'todo_id is required for deleting todo'}), 400
+
+            success = TodoRepository.delete(todo_id, user_id)
+            if not success:
+                return jsonify({'error': f'Todo not found or access denied (ID: {todo_id})'}), 404
+
+            result_data['message'] = f'Todo deleted successfully (ID: {todo_id})'
+
+        elif intent == 'list_todos':
+            filter_param = parameters.get('filter', 'all')
+            limit = parameters.get('limit', 10)
+
+            todos_list = TodoRepository.get_all_by_user(user_id)
+            # 应用过滤
+            if filter_param == 'active':
+                todos_list = [t for t in todos_list if not t.completed]
+            elif filter_param == 'completed':
+                todos_list = [t for t in todos_list if t.completed]
+            elif filter_param.startswith('tag:'):
+                tag = filter_param[4:]
+                todos_list = [t for t in todos_list if tag in [tag_obj.tag for tag_obj in t.tags]]
+            # 'all' 则不过滤
+
+            # 应用限制
+            todos_list = todos_list[:limit]
+
+            result_data['todos'] = [todo.to_dict() for todo in todos_list]
+            result_data['count'] = len(todos_list)
+            result_data['filter'] = filter_param
+
+        elif intent == 'mark_complete':
+            todo_id = parameters.get('todo_id')
+            if not todo_id:
+                return jsonify({'error': 'todo_id is required for marking todo complete'}), 400
+
+            todo = TodoRepository.get_by_id(todo_id, user_id)
+            if not todo:
+                return jsonify({'error': f'Todo not found or access denied (ID: {todo_id})'}), 404
+
+            updated_todo = TodoRepository.update(todo_id, user_id, completed=True)
+            result_data['todo'] = updated_todo.to_dict()
+            result_data['message'] = f'Todo marked as completed (ID: {todo_id})'
+
+        elif intent == 'mark_incomplete':
+            todo_id = parameters.get('todo_id')
+            if not todo_id:
+                return jsonify({'error': 'todo_id is required for marking todo incomplete'}), 400
+
+            todo = TodoRepository.get_by_id(todo_id, user_id)
+            if not todo:
+                return jsonify({'error': f'Todo not found or access denied (ID: {todo_id})'}), 404
+
+            updated_todo = TodoRepository.update(todo_id, user_id, completed=False)
+            result_data['todo'] = updated_todo.to_dict()
+            result_data['message'] = f'Todo marked as incomplete (ID: {todo_id})'
+
+        elif intent == 'get_todo':
+            todo_id = parameters.get('todo_id')
+            if not todo_id:
+                return jsonify({'error': 'todo_id is required for getting todo details'}), 400
+
+            todo = TodoRepository.get_by_id(todo_id, user_id)
+            if not todo:
+                return jsonify({'error': f'Todo not found or access denied (ID: {todo_id})'}), 404
+
+            result_data['todo'] = todo.to_dict()
+
+        elif intent == 'chat':
+            # 非待办事项管理的聊天回复
+            result_data['response'] = parameters.get('response', 'I can help you manage your todos. Please provide instructions.')
+            result_data['message'] = 'Chat response'
+
+        elif intent == 'clarify':
+            result_data['question'] = parameters.get('question', 'Could you clarify your request?')
+            result_data['message'] = 'Need clarification'
+
+        else:
+            return jsonify({'error': f'Unknown intent: {intent}'}), 400
+
+        return jsonify(result_data)
+
+    except requests.exceptions.RequestException as e:
+        print(f"AI Todo Agent API Error: {type(e).__name__}: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            status_code = e.response.status_code
+            if status_code == 401:
+                return jsonify({'error': 'DeepSeek API authentication failed. Check API key.'}), 500
+            elif status_code == 429:
+                return jsonify({'error': 'DeepSeek API rate limit exceeded. Please try again later.'}), 500
+            else:
+                return jsonify({'error': f'DeepSeek API request failed: {status_code}'}), 500
+        else:
+            return jsonify({'error': f'DeepSeek API connection error: {str(e)}'}), 500
+    except Exception as e:
+        print(f"AI Todo Agent Error: {type(e).__name__}: {str(e)}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 
 if __name__ == '__main__':
